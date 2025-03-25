@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Direct Hit Shooter</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #333;
+        font-family: Arial, sans-serif;
+      }
+      #gameCanvas {
+        width: 100%;
+        height: 100vh;
+        display: block;
+      }
+      #hud {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: white;
+        font-size: 20px;
+      }
+      #healthBar {
+        background-color: #333;
+        width: 200px;
+        height: 20px;
+        border: 2px solid white;
+      }
+      #healthFill {
+        background-color: #0f0;
+        height: 100%;
+        width: 100%;
+        transition: width 0.3s;
+      }
+      #stopwatch {
+        margin-top: 5px;
+        font-family: monospace;
+        font-size: 22px;
+      }
+      #highScore {
+        margin-top: 5px;
+        font-family: monospace;
+        font-size: 22px;
+        color: #ffd700;
+      }
+      #crosshair {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 20px;
+        height: 20px;
+        pointer-events: none;
+      }
+      #crosshair::before,
+      #crosshair::after {
+        content: "";
+        position: absolute;
+        background-color: rgba(255, 255, 255, 0.8);
+      }
+      #crosshair::before {
+        width: 2px;
+        height: 20px;
+        left: 9px;
+      }
+      #crosshair::after {
+        width: 20px;
+        height: 2px;
+        top: 9px;
+      }
+      #instructions {
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: white;
+        text-align: center;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 10px;
+        border-radius: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="crosshair"></div>
+    <div id="hud">
+      <div>Health:</div>
+      <div id="healthBar"><div id="healthFill"></div></div>
+      <div id="stopwatch">Time: 00:00.00</div>
+      <div id="highScore">High Score: 00:00.00</div>
+    </div>
+    <div id="instructions">
+      <p>WASD to move | Mouse to aim | Click to shoot</p>
+    </div>
+
+    <script>
+      // Audio setup
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Sound functions
+      function playSound(type) {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // Configure sound based on type
+        switch(type) {
+          case 'shoot':
+            oscillator.type = 'square';
+            oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.1);
+            break;
+            
+          case 'enemyDeath':
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // A4 note
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+            oscillator.frequency.exponentialRampToValueAtTime(110, audioContext.currentTime + 0.2); // A2 note
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.2);
+            break;
+            
+          case 'powerUp':
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // A4 note
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+            oscillator.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.3); // A5 note
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.3);
+            break;
+            
+          case 'playerDamage':
+            oscillator.type = 'triangle';
+            oscillator.frequency.setValueAtTime(220, audioContext.currentTime); // A3 note
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+            oscillator.frequency.exponentialRampToValueAtTime(110, audioContext.currentTime + 0.15); // A2 note
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.15);
+            break;
+            
+          case 'gameOver':
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            oscillator.frequency.exponentialRampToValueAtTime(110, audioContext.currentTime + 0.5); // A2 note
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.5);
+            break;
+        }
+      }
+
+      // Background music setup
+      let backgroundMusicOscillator = null;
+      let backgroundMusicGainNode = null;
+      let backgroundMusicInterval = null;
+
+      function startBackgroundMusic() {
+        if (backgroundMusicOscillator) return;
+        
+        backgroundMusicOscillator = audioContext.createOscillator();
+        backgroundMusicGainNode = audioContext.createGain();
+        
+        backgroundMusicOscillator.connect(backgroundMusicGainNode);
+        backgroundMusicGainNode.connect(audioContext.destination);
+        
+        backgroundMusicOscillator.type = 'sine';
+        backgroundMusicGainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        
+        // Create a simple arpeggio pattern
+        const notes = [440, 550, 660, 880]; // A4, C#5, E5, A5
+        let noteIndex = 0;
+        
+        backgroundMusicInterval = setInterval(() => {
+          backgroundMusicOscillator.frequency.setValueAtTime(notes[noteIndex], audioContext.currentTime);
+          noteIndex = (noteIndex + 1) % notes.length;
+        }, 500);
+        
+        backgroundMusicOscillator.start();
+      }
+
+      function stopBackgroundMusic() {
+        if (backgroundMusicInterval) {
+          clearInterval(backgroundMusicInterval);
+          backgroundMusicInterval = null;
+        }
+        if (backgroundMusicOscillator) {
+          backgroundMusicOscillator.stop();
+          backgroundMusicOscillator = null;
+        }
+      }
+
+      // Canvas setup
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      // Game variables
+      const player = {
+        x: canvas.width / 2,
+        y: canvas.height / 2,
+        radius: 20,
+        speed: 4,
+        health: 100,
+        maxHealth: 100,
+        color: "#4488ff",
+        invulnerable: false,
+        invulnerableTimer: 0,
+        hasMinigun: false,
+        minigunTimer: 0,
+        minigunDuration: 600, // 10 seconds at 60fps
+        hasStrength: false,
+        strengthTimer: 0,
+        strengthDuration: 600, // 10 seconds at 60fps
+        hasHoming: false,
+        homingTimer: 0,
+        homingDuration: 600, // 10 seconds at 60fps
+        baseDamage: 13.5,
+        strengthMultiplier: 2.5,
+        shootCooldown: 0,
+        shootCooldownTime: 15, // 0.25 seconds at 60fps (20% faster)
+        isSprinting: false,
+        sprintTimer: 0,
+        sprintDuration: 180, // 3 seconds at 60fps
+        sprintCooldown: 0,
+        sprintCooldownTime: 900, // 15 seconds at 60fps
+        baseSpeed: 3 // Base movement speed
+      };
+
+      // Tank spawn variables
+      let tankSpawned = false;
+      const TANK_SPAWN_TIME = 60000; // 1 minute in milliseconds
+
+      // Difficulty scaling
+      const difficultyScaling = {
+        healthMultiplier: 1,
+        damageMultiplier: 1,
+        updateInterval: 30000, // Update every 30 seconds
+        lastUpdate: 0
+      };
+
+      const enemies = [];
+      const bullets = [];
+      const particles = [];
+      const powerUps = []; // Array to store active power-ups
+
+      let keys = {};
+      let mouseX = 0;
+      let mouseY = 0;
+      let gameOver = false;
+
+      // Stopwatch variables
+      let startTime = 0;
+      let stopwatchTime = 0;
+      let stopwatchRunning = false;
+
+      // High score
+      let highScore = localStorage.getItem('highScore') || 0;
+      highScore = parseInt(highScore);
+
+      // Input handling
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "w") keys.w = true;
+        if (e.key === "s") keys.s = true;
+        if (e.key === "a") keys.a = true;
+        if (e.key === "d") keys.d = true;
+        if (e.key === " " && !player.isSprinting && player.sprintCooldown <= 0) {
+          player.isSprinting = true;
+          player.sprintTimer = player.sprintDuration;
+          playSound('powerup');
+        }
+      });
+
+      window.addEventListener("keyup", (e) => {
+        if (e.key === "w") keys.w = false;
+        if (e.key === "s") keys.s = false;
+        if (e.key === "a") keys.a = false;
+        if (e.key === "d") keys.d = false;
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+      });
+
+      window.addEventListener("mousedown", (e) => {
+        if (!gameOver) {
+          fireBullet();
+        } else {
+          // Restart game
+          resetGame();
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      });
+
+      function resetGame() {
+        player.x = canvas.width / 2;
+        player.y = canvas.height / 2;
+        player.health = 100;
+        player.invulnerable = false;
+        player.invulnerableTimer = 0;
+        enemies.length = 0;
+        bullets.length = 0;
+        particles.length = 0;
+        powerUps.length = 0;
+        gameOver = false;
+        tankSpawned = false;
+        
+        // Reset stopwatch
+        startTime = Date.now();
+        stopwatchTime = 0;
+        stopwatchRunning = true;
+        
+        // Reset audio
+        stopBackgroundMusic();
+        startBackgroundMusic();
+        
+        updateHUD();
+      }
+
+      // Stopwatch functions
+      function startStopwatch() {
+        startTime = Date.now();
+        stopwatchRunning = true;
+      }
+
+      function stopStopwatch() {
+        stopwatchRunning = false;
+      }
+
+      function updateStopwatch() {
+        if (stopwatchRunning) {
+          stopwatchTime = Date.now() - startTime;
+        }
+      }
+
+      function formatTime(timeInMs) {
+        const totalSeconds = Math.floor(timeInMs / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        const milliseconds = Math.floor((timeInMs % 1000) / 10);
+        
+        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
+      }
+
+      // Game functions
+      function spawnEnemy() {
+        // Don't spawn if we already have 20 enemies
+        if (enemies.length >= 20) return;
+
+        // Create enemy with weighted random selection
+        const rand = Math.random();
+        let type;
+        if (rand < 0.4) { // 40% chance for grunt
+          type = "grunt";
+        } else if (rand < 0.7) { // 30% chance for shieldBearer
+          type = "shieldBearer";
+        } else if (rand < 0.9) { // 20% chance for speeder
+          type = "speeder";
+        } else { // 10% chance for tank
+          type = "tank";
+        }
+
+        // Base health values
+        const baseHealth = {
+          grunt: 54,
+          shieldBearer: 60,
+          speeder: 40,
+          tank: 202.5 // Takes 15 shots to kill (13.5 * 15)
+        };
+
+        let enemy = {
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          radius: 30,
+          speed: 1.5,
+          health: Math.floor(baseHealth[type] * difficultyScaling.healthMultiplier),
+          maxHealth: Math.floor(baseHealth[type] * difficultyScaling.healthMultiplier),
+          type: type,
+          color: "#ff4444",
+          isInvulnerable: false,
+        };
+
+        // Add special properties based on enemy type
+        if (type === "shieldBearer") {
+          enemy.speed = 1.2;
+          enemy.radius = 35;
+          enemy.attackTimer = 0;
+          enemy.shieldActive = true;
+          enemy.shieldRadius = enemy.radius + 10; // Shield radius
+          enemy.shieldAngle = Math.PI * 1.4; // Shield covers 140% of PI on each side (70% of a full circle)
+        } else if (type === "speeder") {
+          enemy.speed = 2.5;
+          enemy.radius = 25;
+        } else if (type === "tank") {
+          enemy.speed = 0.5; // Faster speed for tank (was 0.3)
+        }
+
+        enemies.push(enemy);
+      }
+
+      function spawnTank() {
+        // Don't spawn if we already have 20 enemies
+        if (enemies.length >= 20) return;
+
+        // Determine spawn position outside the screen
+        let x, y;
+        const side = Math.floor(Math.random() * 4);
+
+        if (side === 0) {
+          // Top
+          x = Math.random() * canvas.width;
+          y = -50;
+        } else if (side === 1) {
+          // Right
+          x = canvas.width + 50;
+          y = Math.random() * canvas.height;
+        } else if (side === 2) {
+          // Bottom
+          x = Math.random() * canvas.width;
+          y = canvas.height + 50;
+        } else {
+          // Left
+          x = -50;
+          y = Math.random() * canvas.height;
+        }
+
+        // Create tank enemy
+        const tank = {
+          x: x,
+          y: y,
+          radius: 30, // Same as regular enemies
+          speed: 0.5, // Faster speed (was 0.3)
+          health: Math.floor(202.5 * difficultyScaling.healthMultiplier), // Takes 15 shots to kill
+          maxHealth: Math.floor(202.5 * difficultyScaling.healthMultiplier),
+          type: "tank",
+          color: "#ff4444", // Same as regular enemies
+          isInvulnerable: false
+        };
+
+        // Create dramatic spawn effect
+        for (let i = 0; i < 100; i++) {
+          createParticles(tank.x, tank.y, 1, "#ff4444", 5);
+        }
+        createParticles(tank.x, tank.y, 30, "#ff4444", 3);
+        playSound('enemyDeath');
+        playSound('enemyDeath');
+
+        enemies.push(tank);
+        tankSpawned = true;
+      }
+
+      function fireBullet() {
+        // Check if shooting is on cooldown
+        if (player.shootCooldown > 0) return;
+
+        // Play shoot sound
+        playSound('shoot');
+
+        const angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+        const speed = 12;
+
+        // Create bullet with normal properties
+        const bullet = {
+          x: player.x,
+          y: player.y,
+          radius: 5,
+          dx: Math.cos(angle) * speed,
+          dy: Math.sin(angle) * speed,
+          color: player.hasMinigun ? "#ff00ff" : "#ffffff",
+          lifetime: 60,
+          damage: player.hasStrength ? player.baseDamage * player.strengthMultiplier : player.baseDamage,
+        };
+
+        bullets.push(bullet);
+
+        // If minigun is active, create an additional bullet with slight spread
+        if (player.hasMinigun) {
+          const spreadAngle = angle + (Math.random() - 0.5) * 0.2; // ±0.1 radians spread
+          bullets.push({
+            ...bullet,
+            dx: Math.cos(spreadAngle) * speed,
+            dy: Math.sin(spreadAngle) * speed,
+            color: "#ff00ff",
+          });
+        }
+
+        // Set shooting cooldown
+        player.shootCooldown = player.hasMinigun ? Math.floor(player.shootCooldownTime * 0.7) : player.shootCooldownTime;
+      }
+
+      function createParticles(x, y, count, color, speed) {
+        for (let i = 0; i < count; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const velocity = Math.random() * speed;
+
+          particles.push({
+            x: x,
+            y: y,
+            radius: Math.random() * 3 + 1,
+            dx: Math.cos(angle) * velocity,
+            dy: Math.sin(angle) * velocity,
+            alpha: 1,
+            color: color,
+            fadeSpeed: 0.02 + Math.random() * 0.03,
+          });
+        }
+      }
+
+      function updatePlayer() {
+        // Calculate movement speed based on sprint state
+        const currentSpeed = player.isSprinting ? player.baseSpeed * 1.5 : player.baseSpeed;
+
+        // Update sprint state
+        if (player.isSprinting) {
+          player.sprintTimer--;
+          if (player.sprintTimer <= 0) {
+            player.isSprinting = false;
+            player.sprintCooldown = player.sprintCooldownTime;
+          }
+        } else if (player.sprintCooldown > 0) {
+          player.sprintCooldown--;
+        }
+
+        // Update position based on input
+        if (keys.w) player.y -= currentSpeed;
+        if (keys.s) player.y += currentSpeed;
+        if (keys.a) player.x -= currentSpeed;
+        if (keys.d) player.x += currentSpeed;
+
+        // Keep player in bounds
+        player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.x));
+        player.y = Math.max(player.radius, Math.min(canvas.height - player.radius, player.y));
+
+        // Update cooldowns
+        if (player.shootCooldown > 0) {
+          player.shootCooldown--;
+        }
+
+        // Update invulnerability
+        if (player.invulnerable) {
+          player.invulnerableTimer--;
+          if (player.invulnerableTimer <= 0) {
+            player.invulnerable = false;
+          }
+        }
+      }
+
+      function updateEnemies() {
+        for (let i = enemies.length - 1; i >= 0; i--) {
+          const enemy = enemies[i];
+
+          // Move enemy towards player
+          const dx = player.x - enemy.x;
+          const dy = player.y - enemy.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist > 5) {
+            // Don't move if very close to player
+            enemy.x += (dx / dist) * enemy.speed;
+            enemy.y += (dy / dist) * enemy.speed;
+          }
+
+          // Update special behaviors based on enemy type
+          if (enemy.type === "shieldBearer") {
+            // Shield bearers have periodic vulnerability
+            enemy.attackTimer++;
+
+            if (enemy.attackTimer > 300) { // Changed from 180 to 300 (5 seconds)
+              // Shield deactivates after 5 seconds
+              enemy.shieldActive = false;
+              enemy.isInvulnerable = false;
+
+              if (enemy.attackTimer > 780) { // Changed from 660 to 780 (5 + 8 seconds)
+                // Shield reactivates after 8 seconds of being inactive
+                enemy.attackTimer = 0;
+                enemy.shieldActive = true;
+                enemy.isInvulnerable = true;
+              }
+            }
+          }
+
+          // Check collision with player
+          if (dist < player.radius + enemy.radius && !player.invulnerable) {
+            // Base damage values
+            const baseDamage = {
+              speeder: 20,
+              grunt: 33,
+              shieldBearer: 50,
+              tank: 100 // One-shot damage
+            };
+            
+            // Calculate damage with difficulty scaling
+            const damage = Math.floor(baseDamage[enemy.type] * difficultyScaling.damageMultiplier);
+            
+            // Apply damage
+            player.health -= damage;
+            
+            // Make player invulnerable
+            player.invulnerable = true;
+            player.invulnerableTimer = 90; // 1.5 seconds at 60fps
+            
+            playSound('playerDamage');
+            createParticles(player.x, player.y, 15, "#ff0000", 3);
+            
+            // Knockback player
+            player.x += (dx / dist) * -20; // Increased knockback
+            player.y += (dy / dist) * -20;
+            
+            updateHUD();
+
+            // Check if player died
+            if (player.health <= 0) {
+              gameOver = true;
+              stopStopwatch();
+              playSound('gameOver');
+              stopBackgroundMusic();
+              
+              // Update high score
+              if (stopwatchTime > highScore) {
+                highScore = stopwatchTime;
+                localStorage.setItem('highScore', highScore);
+              }
+              
+              // Clear all power-ups
+              powerUps.length = 0;
+              
+              // Reset power-up states
+              player.hasMinigun = false;
+              player.hasStrength = false;
+              player.hasHoming = false;
+            }
+
+            // Create explosion effect for the enemy
+            createParticles(enemy.x, enemy.y, 40, "#ffaa00", 5);
+            playSound('enemyDeath');
+
+            // Heal player for 5 health
+            player.health = Math.min(player.maxHealth, player.health + 5);
+            createDamageText(enemy.x, enemy.y, "+5 HP", "#00ff00");
+
+            // 10% chance to spawn power-up
+            if (Math.random() < 0.1) {
+              // 50% chance for minigun, 10% chance for strength, 30% chance for homing
+              const rand = Math.random();
+              const powerUpType = rand < 0.5 ? "minigun" : rand < 0.6 ? "strength" : rand < 0.9 ? "homing" : "homing";
+              powerUps.push({
+                x: enemy.x,
+                y: enemy.y,
+                radius: 15,
+                type: powerUpType,
+                color: powerUpType === "minigun" ? "#ff00ff" : powerUpType === "strength" ? "#ff8800" : "#00ff00",
+                rotation: 0,
+                rotationSpeed: 0.05,
+                bobOffset: 0,
+                bobSpeed: 0.05,
+                lifetime: 1200 // 20 seconds at 60fps
+              });
+            }
+
+            // Remove the enemy that dealt damage
+            enemies.splice(i, 1);
+            
+            // Only process one collision per frame
+            break;
+          }
+        }
+      }
+
+      // Helper function to check if a point is within a shield arc
+      function isPointInShield(point, enemy) {
+        if (!enemy.shieldActive) return false;
+        
+        // Calculate angle from enemy to player (shield direction)
+        const playerAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+        
+        // Calculate angle from enemy to bullet
+        const bulletAngle = Math.atan2(point.y - enemy.y, point.x - enemy.x);
+        
+        // Calculate difference between angles
+        let angleDiff = Math.abs(bulletAngle - playerAngle);
+        
+        // Normalize angle difference to be within [0, PI]
+        if (angleDiff > Math.PI) {
+          angleDiff = 2 * Math.PI - angleDiff;
+        }
+        
+        // Check if point is within the shield's arc angle and distance
+        const distance = Math.sqrt(
+          Math.pow(point.x - enemy.x, 2) + Math.pow(point.y - enemy.y, 2)
+        );
+        
+        return angleDiff <= enemy.shieldAngle / 2 && 
+               distance <= enemy.shieldRadius && 
+               distance >= enemy.radius;
+      }
+
+      function updateBullets() {
+        for (let i = bullets.length - 1; i >= 0; i--) {
+          const bullet = bullets[i];
+
+          // Move bullet
+          bullet.x += bullet.dx;
+          bullet.y += bullet.dy;
+          bullet.lifetime--;
+
+          // Check if bullet is out of bounds or expired
+          if (
+            bullet.x < 0 ||
+            bullet.x > canvas.width ||
+            bullet.y < 0 ||
+            bullet.y > canvas.height ||
+            bullet.lifetime <= 0
+          ) {
+            bullets.splice(i, 1);
+            continue;
+          }
+
+          // Add homing behavior if player has homing power-up
+          if (player.hasHoming) {
+            // Find nearest enemy
+            let nearestEnemy = null;
+            let minDist = Infinity;
+            
+            for (const enemy of enemies) {
+              const dx = enemy.x - bullet.x;
+              const dy = enemy.y - bullet.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              
+              if (dist < minDist) {
+                minDist = dist;
+                nearestEnemy = enemy;
+              }
+            }
+            
+            // If found an enemy, adjust bullet direction towards it
+            if (nearestEnemy) {
+              const dx = nearestEnemy.x - bullet.x;
+              const dy = nearestEnemy.y - bullet.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              
+              // Normalize direction
+              const targetDx = dx / dist;
+              const targetDy = dy / dist;
+              
+              // Smoothly adjust current direction towards target
+              const turnSpeed = 0.8; // Increased from 0.2 to 0.8 for more aggressive tracking
+              bullet.dx += (targetDx - bullet.dx / 12) * turnSpeed;
+              bullet.dy += (targetDy - bullet.dy / 12) * turnSpeed;
+              
+              // Normalize speed
+              const speed = Math.sqrt(bullet.dx * bullet.dx + bullet.dy * bullet.dy);
+              const homingSpeed = 14.4; // 20% faster than normal speed (12)
+              bullet.dx = (bullet.dx / speed) * homingSpeed;
+              bullet.dy = (bullet.dy / speed) * homingSpeed;
+
+              // If very close to target, snap directly to it
+              if (dist < 5) {
+                bullet.dx = targetDx * homingSpeed;
+                bullet.dy = targetDy * homingSpeed;
+              }
+            }
+          }
+
+          // Check collision with enemies
+          let hitShield = false;
+          
+          for (let j = 0; j < enemies.length; j++) {
+            const enemy = enemies[j];
+            
+            const dx = bullet.x - enemy.x;
+            const dy = bullet.y - enemy.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // First check for shield collision
+            if (enemy.type === "shieldBearer" && enemy.shieldActive) {
+              if (dist <= enemy.shieldRadius && isPointInShield(bullet, enemy)) {
+                // Create shield hit effect
+                createParticles(bullet.x, bullet.y, 5, "#aaaaaa", 2);
+                
+                // Show "BLOCKED" text
+                createDamageText(bullet.x, bullet.y, "BLOCKED", "#aaaaaa");
+                
+                // Remove bullet without damaging the shield
+                bullets.splice(i, 1);
+                hitShield = true;
+                break;
+              }
+            }
+            
+            // Skip body collision if already hit shield or enemy is invulnerable
+            if (hitShield || enemy.isInvulnerable) continue;
+
+            // Check collision with enemy body
+            if (dist < bullet.radius + enemy.radius) {
+              // Damage enemy
+              enemy.health -= bullet.damage;
+
+              // Create hit effect
+              createParticles(bullet.x, bullet.y, 10, "#ffffff", 3);
+
+              // Show damage text
+              createDamageText(
+                bullet.x,
+                bullet.y,
+                bullet.damage.toString(),
+                "#ffffff"
+              );
+
+              // Remove bullet
+              bullets.splice(i, 1);
+              hitShield = true; // Use this flag to indicate hit happened
+
+              // Check if enemy died
+              if (enemy.health <= 0) {
+                // Create explosion effect
+                createParticles(enemy.x, enemy.y, 40, "#ffaa00", 5);
+                playSound('enemyDeath');
+
+                // Heal player for 5 health
+                player.health = Math.min(player.maxHealth, player.health + 5);
+                createDamageText(enemy.x, enemy.y, "+5 HP", "#00ff00");
+
+                // 10% chance to spawn power-up
+                if (Math.random() < 0.1) {
+                  // 50% chance for minigun, 10% chance for strength, 30% chance for homing
+                  const rand = Math.random();
+                  const powerUpType = rand < 0.5 ? "minigun" : rand < 0.6 ? "strength" : rand < 0.9 ? "homing" : "homing";
+                  powerUps.push({
+                    x: enemy.x,
+                    y: enemy.y,
+                    radius: 15,
+                    type: powerUpType,
+                    color: powerUpType === "minigun" ? "#ff00ff" : powerUpType === "strength" ? "#ff8800" : "#00ff00",
+                    rotation: 0,
+                    rotationSpeed: 0.05,
+                    bobOffset: 0,
+                    bobSpeed: 0.05,
+                    lifetime: 1200 // 20 seconds at 60fps
+                  });
+                }
+
+                // Remove enemy
+                enemies.splice(j, 1);
+              }
+              break;
+            }
+          }
+          
+          if (hitShield) continue; // Skip to next bullet if we already handled this one
+        }
+      }
+
+      // Damage text objects
+      const damageTexts = [];
+
+      function createDamageText(x, y, text, color) {
+        damageTexts.push({
+          x: x,
+          y: y,
+          text: text,
+          color: color,
+          lifetime: 40,
+          dy: -1.5, // Move upward
+        });
+      }
+
+      function updateDamageTexts() {
+        for (let i = damageTexts.length - 1; i >= 0; i--) {
+          const dt = damageTexts[i];
+          dt.y += dt.dy;
+          dt.lifetime--;
+
+          if (dt.lifetime <= 0) {
+            damageTexts.splice(i, 1);
+          }
+        }
+      }
+
+      function drawDamageTexts() {
+        for (const dt of damageTexts) {
+          const alpha = dt.lifetime / 40;
+          ctx.font = "16px Arial";
+          ctx.fillStyle = dt.color
+            .replace("rgb", "rgba")
+            .replace(")", `, ${alpha})`);
+          ctx.textAlign = "center";
+          ctx.fillText(dt.text, dt.x, dt.y);
+        }
+      }
+
+      function updateParticles() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+
+          p.x += p.dx;
+          p.y += p.dy;
+          p.alpha -= p.fadeSpeed;
+
+          if (p.alpha <= 0) {
+            particles.splice(i, 1);
+          }
+        }
+      }
+
+      function updatePowerUps() {
+        for (let i = powerUps.length - 1; i >= 0; i--) {
+          const powerUp = powerUps[i];
+          
+          // Update lifetime
+          powerUp.lifetime--;
+          if (powerUp.lifetime <= 0) {
+            // Create fade out effect
+            createParticles(powerUp.x, powerUp.y, 10, powerUp.color, 2);
+            powerUps.splice(i, 1);
+            continue;
+          }
+          
+          // Update rotation and bobbing animation
+          powerUp.rotation += powerUp.rotationSpeed;
+          powerUp.bobOffset += powerUp.bobSpeed;
+          
+          // Check collision with player
+          const dx = player.x - powerUp.x;
+          const dy = player.y - powerUp.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist < player.radius + powerUp.radius) {
+            // Apply power-up effect
+            if (powerUp.type === "minigun") {
+              player.hasMinigun = true;
+              player.minigunTimer = player.minigunDuration;
+              createParticles(powerUp.x, powerUp.y, 20, "#ff00ff", 2);
+              createDamageText(powerUp.x, powerUp.y, "MINIGUN!", "#ff00ff");
+              playSound('powerUp');
+            } else if (powerUp.type === "strength") {
+              player.hasStrength = true;
+              player.strengthTimer = player.strengthDuration;
+              createParticles(powerUp.x, powerUp.y, 20, "#ff8800", 2);
+              createDamageText(powerUp.x, powerUp.y, "STRENGTH!", "#ff8800");
+              playSound('powerUp');
+            } else if (powerUp.type === "homing") {
+              player.hasHoming = true;
+              player.homingTimer = player.homingDuration;
+              createParticles(powerUp.x, powerUp.y, 20, "#00ff00", 2);
+              createDamageText(powerUp.x, powerUp.y, "HOMING!", "#00ff00");
+              playSound('powerUp');
+            }
+            
+            // Remove power-up
+            powerUps.splice(i, 1);
+          }
+        }
+
+        // Update power-up timers
+        if (player.hasMinigun) {
+          player.minigunTimer--;
+          if (player.minigunTimer <= 0) {
+            player.hasMinigun = false;
+            createDamageText(player.x, player.y - 30, "MINIGUN EXPIRED", "#ff00ff");
+          }
+        }
+
+        if (player.hasStrength) {
+          player.strengthTimer--;
+          if (player.strengthTimer <= 0) {
+            player.hasStrength = false;
+            createDamageText(player.x, player.y - 30, "STRENGTH EXPIRED", "#ff8800");
+          }
+        }
+
+        if (player.hasHoming) {
+          player.homingTimer--;
+          if (player.homingTimer <= 0) {
+            player.hasHoming = false;
+            createDamageText(player.x, player.y - 30, "HOMING EXPIRED", "#00ff00");
+          }
+        }
+      }
+
+      function drawPlayer() {
+        // Make player flash when invulnerable
+        if (!player.invulnerable || player.invulnerableTimer % 6 < 3) {
+          ctx.beginPath();
+          ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+          ctx.fillStyle = player.color;
+          ctx.fill();
+
+          // Draw player direction indicator
+          const angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+          ctx.beginPath();
+          ctx.moveTo(player.x, player.y);
+          ctx.lineTo(
+            player.x + Math.cos(angle) * (player.radius + 10),
+            player.y + Math.sin(angle) * (player.radius + 10)
+          );
+          ctx.lineWidth = 5;
+          ctx.strokeStyle = "#ffffff";
+          ctx.stroke();
+        }
+      }
+
+      function drawEnemies() {
+        for (const enemy of enemies) {
+          // Draw enemy body
+          ctx.beginPath();
+          ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
+          ctx.fillStyle = enemy.color;
+          ctx.fill();
+
+          // Draw spikes for tank
+          if (enemy.type === "tank") {
+            const numSpikes = 8;
+            const spikeLength = 15;
+            
+            for (let i = 0; i < numSpikes; i++) {
+              const angle = (i / numSpikes) * Math.PI * 2;
+              const startX = enemy.x + Math.cos(angle) * enemy.radius;
+              const startY = enemy.y + Math.sin(angle) * enemy.radius;
+              const endX = enemy.x + Math.cos(angle) * (enemy.radius + spikeLength);
+              const endY = enemy.y + Math.sin(angle) * (enemy.radius + spikeLength);
+              
+              // Draw triangular spike pointing outward
+              ctx.beginPath();
+              ctx.moveTo(startX, startY);
+              ctx.lineTo(
+                endX + Math.cos(angle + 0.3) * 8,
+                endY + Math.sin(angle + 0.3) * 8
+              );
+              ctx.lineTo(
+                endX + Math.cos(angle - 0.3) * 8,
+                endY + Math.sin(angle - 0.3) * 8
+              );
+              ctx.closePath();
+              ctx.fillStyle = "#888888"; // Grey color
+              ctx.fill();
+            }
+          }
+
+          // Draw enemy type indicator
+          ctx.font = "14px Arial";
+          ctx.fillStyle = "white";
+          ctx.textAlign = "center";
+          ctx.fillText(enemy.type, enemy.x, enemy.y - enemy.radius - 10);
+
+          // Draw shield for shieldBearer
+          if (enemy.type === "shieldBearer" && enemy.shieldActive) {
+            const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+            ctx.beginPath();
+            ctx.arc(
+              enemy.x,
+              enemy.y,
+              enemy.shieldRadius,
+              angle - enemy.shieldAngle/2,
+              angle + enemy.shieldAngle/2
+            );
+            ctx.lineWidth = 8;
+            ctx.strokeStyle = "#aaaaaa";
+            ctx.stroke();
+          }
+
+          // Draw health bar
+          const healthPct = enemy.health / enemy.maxHealth;
+          const barWidth = enemy.radius * 2;
+          const barHeight = 6;
+
+          ctx.fillStyle = "#333333";
+          ctx.fillRect(
+            enemy.x - barWidth / 2,
+            enemy.y + enemy.radius + 5,
+            barWidth,
+            barHeight
+          );
+
+          ctx.fillStyle =
+            healthPct > 0.5
+              ? "#00ff00"
+              : healthPct > 0.25
+              ? "#ffff00"
+              : "#ff0000";
+          ctx.fillRect(
+            enemy.x - barWidth / 2,
+            enemy.y + enemy.radius + 5,
+            barWidth * healthPct,
+            barHeight
+          );
+        }
+      }
+
+      function drawBullets() {
+        for (const bullet of bullets) {
+          ctx.beginPath();
+          ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+          ctx.fillStyle = bullet.color;
+          ctx.fill();
+
+          // Draw trail
+          ctx.beginPath();
+          ctx.moveTo(bullet.x, bullet.y);
+          ctx.lineTo(bullet.x - bullet.dx * 2, bullet.y - bullet.dy * 2);
+          ctx.lineWidth = bullet.radius;
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+          ctx.stroke();
+        }
+      }
+
+      function drawParticles() {
+        for (const p of particles) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+
+          const color = p.color.startsWith("rgba")
+            ? p.color.replace(/[\d\.]+\)$/, `${p.alpha})`)
+            : p.color;
+
+          ctx.fillStyle = color;
+          ctx.fill();
+        }
+      }
+
+      function drawPowerUps() {
+        for (const powerUp of powerUps) {
+          // Save context state
+          ctx.save();
+          
+          // Apply bobbing animation
+          const bobY = Math.sin(powerUp.bobOffset) * 5;
+          
+          // Draw power-up
+          ctx.translate(powerUp.x, powerUp.y + bobY);
+          ctx.rotate(powerUp.rotation);
+          
+          if (powerUp.type === "minigun") {
+            // Draw gun symbol
+            ctx.beginPath();
+            ctx.moveTo(-powerUp.radius, 0);
+            ctx.lineTo(powerUp.radius, 0);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = powerUp.color;
+            ctx.stroke();
+            
+            // Draw bullets
+            for (let i = 0; i < 3; i++) {
+              ctx.beginPath();
+              ctx.arc(powerUp.radius - 5 - i * 4, 0, 2, 0, Math.PI * 2);
+              ctx.fillStyle = powerUp.color;
+              ctx.fill();
+            }
+          } else if (powerUp.type === "strength") {
+            // Draw fist symbol
+            ctx.beginPath();
+            ctx.arc(0, 0, powerUp.radius * 0.8, 0, Math.PI * 2);
+            ctx.fillStyle = powerUp.color;
+            ctx.fill();
+            
+            // Draw lightning bolt
+            ctx.beginPath();
+            ctx.moveTo(-powerUp.radius * 0.5, -powerUp.radius * 0.5);
+            ctx.lineTo(0, 0);
+            ctx.lineTo(-powerUp.radius * 0.3, powerUp.radius * 0.3);
+            ctx.lineTo(powerUp.radius * 0.5, -powerUp.radius * 0.3);
+            ctx.lineTo(0, powerUp.radius * 0.5);
+            ctx.lineTo(-powerUp.radius * 0.5, powerUp.radius * 0.5);
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "#ffffff";
+            ctx.stroke();
+          } else if (powerUp.type === "homing") {
+            // Draw homing symbol
+            ctx.beginPath();
+            ctx.arc(0, 0, powerUp.radius * 0.8, 0, Math.PI * 2);
+            ctx.fillStyle = powerUp.color;
+            ctx.fill();
+            
+            // Draw arrow
+            ctx.beginPath();
+            ctx.moveTo(-powerUp.radius * 0.5, -powerUp.radius * 0.5);
+            ctx.lineTo(0, 0);
+            ctx.lineTo(-powerUp.radius * 0.3, powerUp.radius * 0.3);
+            ctx.lineTo(powerUp.radius * 0.5, -powerUp.radius * 0.3);
+            ctx.lineTo(0, powerUp.radius * 0.5);
+            ctx.lineTo(-powerUp.radius * 0.5, powerUp.radius * 0.5);
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "#ffffff";
+            ctx.stroke();
+          }
+          
+          // Draw glow effect
+          ctx.beginPath();
+          ctx.arc(0, 0, powerUp.radius + 2, 0, Math.PI * 2);
+          ctx.fillStyle = powerUp.type === "minigun" ? "rgba(255, 0, 255, 0.2)" : powerUp.type === "strength" ? "rgba(255, 136, 0, 0.2)" : "rgba(0, 255, 0, 0.2)";
+          ctx.fill();
+          
+          // Restore context state
+          ctx.restore();
+        }
+      }
+
+      function updateHUD() {
+        document.getElementById("healthFill").style.width = `${(player.health / player.maxHealth) * 100}%`;
+        document.getElementById("stopwatch").textContent = `Time: ${formatTime(stopwatchTime)}`;
+        document.getElementById("highScore").textContent = `High Score: ${formatTime(highScore)}`;
+      }
+
+      function drawGameOver() {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.font = "48px Arial";
+        ctx.fillStyle = "white";
+        ctx.textAlign = "center";
+        ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 80);
+        
+        ctx.fillText(
+          `Survival Time: ${formatTime(stopwatchTime)}`,
+          canvas.width / 2,
+          canvas.height / 2 + 10
+        );
+        
+        ctx.fillStyle = "#ffd700";
+        ctx.fillText(
+          `High Score: ${formatTime(highScore)}`,
+          canvas.width / 2,
+          canvas.height / 2 + 60
+        );
+        
+        ctx.fillStyle = "white";
+        ctx.fillText(
+          "Click to restart",
+          canvas.width / 2,
+          canvas.height / 2 + 110
+        );
+      }
+
+      // Game loop
+      let lastTime = 0;
+      let enemySpawnTimer = 0;
+      let frameCount = 0;
+      let lastFpsUpdate = 0;
+
+      function gameLoop(timestamp) {
+        const deltaTime = timestamp - lastTime;
+        lastTime = timestamp;
+
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (!gameOver) {
+          // Update stopwatch
+          updateStopwatch();
+          
+          // Check for tank spawn
+          if (!tankSpawned && stopwatchTime >= TANK_SPAWN_TIME) {
+            spawnTank();
+          }
+          
+          // Update difficulty scaling
+          const currentTime = Date.now();
+          if (currentTime - difficultyScaling.lastUpdate >= difficultyScaling.updateInterval) {
+            difficultyScaling.healthMultiplier += 0.1; // Increase health by 10%
+            difficultyScaling.damageMultiplier += 0.05; // Increase damage by 5%
+            difficultyScaling.lastUpdate = currentTime;
+          }
+          
+          // Spawn enemies
+          enemySpawnTimer += deltaTime;
+          if (enemySpawnTimer > 2000) {
+            spawnEnemy();
+            enemySpawnTimer = 0;
+          }
+
+          // Update game objects
+          updatePlayer();
+          updateEnemies();
+          updateBullets();
+          updateParticles();
+          updatePowerUps();
+          updateDamageTexts();
+          
+          // Update HUD every frame to keep stopwatch current
+          updateHUD();
+        }
+
+        // Draw game objects
+        drawParticles(); // Draw first (background)
+        drawBullets();
+        drawEnemies();
+        drawPlayer();
+        drawDamageTexts();
+        drawPowerUps();
+
+        if (gameOver) {
+          drawGameOver();
+        }
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      // Start game
+      resetGame();
+      gameLoop(0);
+    </script>
+  </body>
+</html>
