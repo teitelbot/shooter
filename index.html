@@ -2,6 +2,7 @@
 <html>
   <head>
     <title>Direct Hit Shooter</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
       body {
         margin: 0;
@@ -80,6 +81,74 @@
         padding: 10px;
         border-radius: 5px;
       }
+      /* Add mobile controls styles */
+      .mobile-controls {
+        display: block;
+        position: fixed;
+        bottom: 20px;
+        width: 100%;
+        z-index: 10;
+        pointer-events: auto;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .d-pad {
+        position: absolute;
+        left: 20px;
+        bottom: 20px;
+        width: 150px;
+        height: 150px;
+      }
+      .d-pad button {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        background: rgba(255, 255, 255, 0.5);
+        border: 3px solid white;
+        border-radius: 30px;
+        color: white;
+        font-size: 24px;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
+        cursor: pointer;
+        outline: none;
+        -webkit-appearance: none;
+        z-index: 20;
+      }
+      .d-pad .up { top: 0; left: 50%; transform: translateX(-50%); }
+      .d-pad .down { bottom: 0; left: 50%; transform: translateX(-50%); }
+      .d-pad .left { left: 0; top: 50%; transform: translateY(-50%); }
+      .d-pad .right { right: 0; top: 50%; transform: translateY(-50%); }
+      
+      .shoot-joystick {
+        position: absolute;
+        right: 20px;
+        bottom: 20px;
+        width: 150px;
+        height: 150px;
+        background: rgba(255, 0, 0, 0.2);
+        border: 3px solid rgba(255, 0, 0, 0.5);
+        border-radius: 75px;
+        touch-action: none;
+      }
+      
+      .joystick-handle {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        background: rgba(255, 0, 0, 0.5);
+        border: 3px solid red;
+        border-radius: 30px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        touch-action: none;
+      }
+      @media (max-width: 768px) {
+        #instructions {
+          display: none;
+        }
+      }
     </style>
   </head>
   <body>
@@ -93,6 +162,19 @@
     </div>
     <div id="instructions">
       <p>WASD to move | Mouse to aim | Click to shoot</p>
+    </div>
+
+    <!-- Add mobile controls HTML -->
+    <div class="mobile-controls">
+      <div class="d-pad">
+        <button class="up">↑</button>
+        <button class="down">↓</button>
+        <button class="left">←</button>
+        <button class="right">→</button>
+      </div>
+      <div class="shoot-joystick">
+        <div class="joystick-handle"></div>
+      </div>
     </div>
 
     <script>
@@ -1313,6 +1395,164 @@
       // Start game
       resetGame();
       gameLoop(0);
+
+      // Add mobile controls initialization
+      const mobileButtons = {
+        up: document.querySelector('.up'),
+        down: document.querySelector('.down'),
+        left: document.querySelector('.left'),
+        right: document.querySelector('.right'),
+        shoot: document.querySelector('.shoot-button')
+      };
+
+      // Touch event handlers for movement
+      mobileButtons.up.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys.w = true;
+      });
+      mobileButtons.up.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys.w = false;
+      });
+      mobileButtons.down.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys.s = true;
+      });
+      mobileButtons.down.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys.s = false;
+      });
+      mobileButtons.left.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys.a = true;
+      });
+      mobileButtons.left.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys.a = false;
+      });
+      mobileButtons.right.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys.d = true;
+      });
+      mobileButtons.right.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys.d = false;
+      });
+      mobileButtons.shoot.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys.space = true;
+      });
+      mobileButtons.shoot.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys.space = false;
+      });
+
+      // Prevent default touch behaviors
+      document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+      document.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+
+      // Adjust canvas size for mobile
+      function resizeCanvas() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        canvas.width = width * 0.95;
+        canvas.height = height * 0.7;
+      }
+      
+      window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+
+      // Add shooting joystick initialization
+      const shootJoystick = document.querySelector('.shoot-joystick');
+      const joystickHandle = document.querySelector('.joystick-handle');
+      let isAiming = false;
+      let joystickStartX = 0;
+      let joystickStartY = 0;
+      let lastJoystickX = 0;
+      let lastJoystickY = 0;
+
+      shootJoystick.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = shootJoystick.getBoundingClientRect();
+        const canvasRect = canvas.getBoundingClientRect();
+        
+        // Calculate relative position within joystick
+        joystickStartX = touch.clientX - rect.left;
+        joystickStartY = touch.clientY - rect.top;
+        isAiming = true;
+        
+        // Start continuous shooting
+        if (!gameOver) {
+          fireBullet();
+          shootInterval = setInterval(() => {
+            if (!gameOver) fireBullet();
+          }, player.shootCooldownTime * (1000/60));
+        }
+      });
+
+      shootJoystick.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (!isAiming) return;
+
+        const touch = e.touches[0];
+        const rect = shootJoystick.getBoundingClientRect();
+        const canvasRect = canvas.getBoundingClientRect();
+        
+        // Calculate position within joystick
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        
+        // Calculate distance from center of joystick
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const maxDistance = rect.width / 2 - joystickHandle.offsetWidth / 2;
+        
+        // Limit handle movement to joystick bounds
+        let limitedX = x;
+        let limitedY = y;
+        if (distance > maxDistance) {
+          const angle = Math.atan2(dy, dx);
+          limitedX = centerX + Math.cos(angle) * maxDistance;
+          limitedY = centerY + Math.sin(angle) * maxDistance;
+        }
+        
+        // Update handle position with transform
+        joystickHandle.style.transform = `translate(-50%, -50%) translate(${limitedX}px, ${limitedY}px)`;
+        
+        // Calculate aim direction relative to player
+        const joystickAngle = Math.atan2(y - centerY, x - centerX);
+        const playerCenterX = player.x;
+        const playerCenterY = player.y;
+        
+        // Project aim point at a fixed distance from player
+        const aimDistance = 100;
+        mouseX = playerCenterX + Math.cos(joystickAngle) * aimDistance;
+        mouseY = playerCenterY + Math.sin(joystickAngle) * aimDistance;
+        
+        lastJoystickX = limitedX;
+        lastJoystickY = limitedY;
+      });
+
+      shootJoystick.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        isAiming = false;
+        
+        // Reset joystick handle position with transform
+        joystickHandle.style.transform = 'translate(-50%, -50%)';
+        
+        // Stop shooting
+        if (shootInterval) {
+          clearInterval(shootInterval);
+          shootInterval = null;
+        }
+      });
+
+      // Add variable for shooting interval
+      let shootInterval = null;
     </script>
   </body>
 </html>
